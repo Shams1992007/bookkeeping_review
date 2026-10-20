@@ -382,41 +382,58 @@ export function buildCompareRows({
   rightRows = [],
   compareFields = [],
 }) {
-  const results = [];
-  const usedRight = new Set();
   const minMatches = Math.min(MIN_MATCHES_FOR_PAIR, compareFields.length);
 
-  for (const leftRow of leftRows) {
-    let bestIndex = -1;
-    let bestScore = -1;
-    let bestDetail = null;
-
-    rightRows.forEach((rightRow, idx) => {
-      if (usedRight.has(idx)) return;
-
-      const { matches, detail } = scorePair(leftRow, rightRow, compareFields);
-      if (matches < minMatches) return;
-
-      if (matches > bestScore) {
-        bestScore = matches;
-        bestIndex = idx;
-        bestDetail = detail;
-      }
-    });
-
-    if (bestIndex >= 0) {
-      usedRight.add(bestIndex);
-
-      results.push({
-        id: `pair-${leftRow.__rowKey}-${rightRows[bestIndex].__rowKey}`,
-        leftRow,
-        rightRow: rightRows[bestIndex],
-        matchDetail: bestDetail,
-        matchedCount: bestScore,
-        manualPair: false,
-      });
+  // Score every candidate pair up front, then assign best-first (highest score
+  // wins its rows before weaker candidates). A plain left-to-right greedy lets an
+  // early left row with a weak 2-field match steal a right row that is a perfect
+  // 4-field match for a later left row, which cascades into a chain of wrong
+  // pairings. Assigning strongest-first breaks that cascade: perfect pairs claim
+  // their partners before mediocre ones ever look.
+  const candidates = [];
+  for (let li = 0; li < leftRows.length; li++) {
+    for (let ri = 0; ri < rightRows.length; ri++) {
+      const { matches, detail } = scorePair(
+        leftRows[li],
+        rightRows[ri],
+        compareFields
+      );
+      if (matches < minMatches) continue;
+      candidates.push({ li, ri, matches, detail });
     }
   }
+
+  // Highest score first; ties resolve by original row order (left, then right)
+  // so the assignment stays deterministic.
+  candidates.sort(
+    (a, b) => b.matches - a.matches || a.li - b.li || a.ri - b.ri
+  );
+
+  const usedLeft = new Set();
+  const usedRight = new Set();
+  const assigned = [];
+  for (const c of candidates) {
+    if (usedLeft.has(c.li) || usedRight.has(c.ri)) continue;
+    usedLeft.add(c.li);
+    usedRight.add(c.ri);
+    assigned.push(c);
+  }
+
+  // Emit results in original left-row order for a stable display/export.
+  const results = assigned
+    .sort((a, b) => a.li - b.li)
+    .map((c) => {
+      const leftRow = leftRows[c.li];
+      const rightRow = rightRows[c.ri];
+      return {
+        id: `pair-${leftRow.__rowKey}-${rightRow.__rowKey}`,
+        leftRow,
+        rightRow,
+        matchDetail: c.detail,
+        matchedCount: c.matches,
+        manualPair: false,
+      };
+    });
 
   const unmatchedLeft = leftRows.filter(
     (l) => !results.some((x) => x.leftRow?.__rowKey === l.__rowKey)

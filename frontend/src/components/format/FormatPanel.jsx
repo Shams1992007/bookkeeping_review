@@ -116,7 +116,7 @@ export default function FormatPanel({
     if (autoDetectedRef.current === detectKey) return;
     autoDetectedRef.current = detectKey;
 
-    const best = detectFormatKey(sourceHeaders, formats, formatKey);
+    const best = detectFormatKey(sourceHeaders, formats, formatKey, file?.name);
     if (best && best !== formatKey) {
       // The auto-fill effect (keyed on formatKey) re-fills for the new format.
       setFormatKey(best);
